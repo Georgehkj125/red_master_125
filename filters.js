@@ -1,67 +1,79 @@
-const {Module} = require('../main');
-const FilterDb = require('./sql/filters');
-Module({pattern: 'filter ?(.*)', fromMe: true, desc: "Adds filter in chat", dontAddCommandList: true}, (async (message, match) => {
-    match = match[1].match(/[\'\"\“](.*?)[\'\"\“]/gsm);
-    if (message.reply_message.text) {
-        await FilterDb.setFilter(message.jid, match[0].replace(/['"“]+/g, ''), message.reply_message.text, match[0][0] === "'" ? true : false);
-        await message.client.sendMessage(message.jid,{text: "_Set_" + match[0].replace(/['"]+/g, '')+" _to filter ✅_"});
-    return;
-    }
-    if (match === null) {
-        filtreler = await FilterDb.getFilter(message.jid);
-        if (filtreler === false) {
-            await message.client.sendMessage(message.jid,{text: "_No filters found in this chat ❌_"})
-        } else {
-            var mesaj = "_Your filters in this chat:_" + '\n';
-            filtreler.map((filter) => mesaj += '```' + filter.dataValues.pattern + '```\n');
-            await message.client.sendMessage(message.jid,{text: mesaj});
-        }
-    } else {
-        if (match.length < 2) {
-            return await message.client.sendMessage(message.jid,{text: "Wrong format" + ' ```.filter "input" "output"'});
-        }
-        await FilterDb.setFilter(message.jid, match[0].replace(/['"“]+/g, ''), match[1].replace(/['"“]+/g, '').replace(/[#]+/g, '\n'), match[0][0] === "'" ? true : false);
-        await message.client.sendMessage(message.jid,{text: "Successfully set "+match[0].replace(/['"]+/g, '')});
-    }
-}));
-Module({pattern: 'stop ?(.*)', fromMe: true, desc: "Deletes a filter", dontAddCommandList: true}, (async (message, match) => {
-    match = match[1].match(/[\'\"\“](.*?)[\'\"\“]/gsm);
-    if (match === null) {
-        return await message.client.sendMessage(message.jid,{text:"Wrong format!" + '\n*Example:* ```.stop "hello"```'})
-    }
+/* Copyright (C) 2020 Yusuf Usta.
 
-    del = await FilterDb.deleteFilter(message.jid, match[0].replace(/['"“]+/g, ''));
-    
-    if (!del) {
-        await message.client.sendMessage(message.jid,{text: "There are already no filters like this ❌"})
-    } else {
-        await message.client.sendMessage(message.jid,{text:"_Successfully deleted filter ✅_"})
+Licensed under the  GPL-3.0 License;
+you may not use this file except in compliance with the License.
+
+WhatsAsena - Yusuf Usta
+*/
+
+const config = require('../../config');
+const { DataTypes } = require('sequelize');
+
+const FiltersDB = config.DATABASE.define('filter', {
+    chat: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    pattern: {
+        type: DataTypes.TEXT,
+        allowNull: false
+    },
+    text: {
+        type: DataTypes.TEXT,
+        allowNull: false
+    },
+    regex: {
+        type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false
     }
-}));
-Module({on: 'text', fromMe: false}, (async (message, match) => {
-    if (message.fromMe) return;
-    var filtreler = await FilterDb.getFilter(message.jid);
-    if (!filtreler) return; 
-    filtreler.map(
-        async (filter) => {
-            pattern = new RegExp(filter.dataValues.regex ? filter.dataValues.pattern : ('\\b(' + filter.dataValues.pattern + ')\\b'), 'gm');
-            if (pattern.test(message.message)) {
-                await message.client.sendMessage(message.jid,{text: filter.dataValues.text}, {quoted: message.data});
-            }
+});
+
+async function getFilter(jid = null, filter = null) {
+    var Wher = {chat: jid};
+    if (filter !== null) Wher.push({pattern: filter});
+    var Msg = await FiltersDB.findAll({
+        where: Wher
+    });
+
+    if (Msg.length < 1) {
+        return false;
+    } else {
+        return Msg;
+    }
+}
+
+
+async function setFilter(jid = null, filter = null, tex = null, regx = false) {
+    var Msg = await FiltersDB.findAll({
+        where: {
+            chat: jid,
+            pattern: filter
         }
-    );
-}));
-Module({on: 'button', fromMe: false}, (async (message, match) => {
-    if (message.fromMe) return;
-    if (!message.button) return;
-    var filtreler = await FilterDb.getFilter(message.jid);
-    if (!filtreler) return; 
-    filtreler.map(
-        async (filter) => {
-            pattern = new RegExp(filter.dataValues.regex ? filter.dataValues.pattern : ('\\b(' + filter.dataValues.pattern + ')\\b'), 'gm');
-            if (pattern.test(message.data.message.buttonsResponseMessage.selectedDisplayText)) {
-                await message.client.sendMessage(message.jid,{text: filter.dataValues.text}, {quoted: message.data});
-            }
+    });
+
+    if (Msg.length < 1) {
+        return await FiltersDB.create({ chat: jid, pattern: filter, text: tex, regex: regx });
+    } else {
+        return await Msg[0].update({ chat: jid, pattern: filter, text: tex, regex: regx });
+    }
+}
+
+async function deleteFilter(jid = null, filter) {
+    var Msg = await FiltersDB.findAll({
+        where: {
+            chat: jid,
+            pattern: filter
         }
-    );
-}));
+    });
+    if (Msg.length < 1) {
+        return false;
+    } else {
+        return await Msg[0].destroy();
+    }
+}
+
+module.exports = {
+    FiltersDB: FiltersDB,
+    getFilter: getFilter,
+    setFilter: setFilter,
+    deleteFilter: deleteFilter
+};
